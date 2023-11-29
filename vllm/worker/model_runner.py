@@ -402,9 +402,19 @@ class CUDAGraphRunner:
         input_metadata: InputMetadata,
     ) -> None:
         assert self.graph is None
+        # Run the model once without capturing the graph.
+        # This is to make sure that the captured graph does not include the
+        # kernel launches for initial benchmarking (e.g., Triton autotune).
+        self.model(
+            input_ids,
+            positions,
+            kv_caches,
+            input_metadata,
+        )
+
+        # Capture the graph.
         self.graph = torch.cuda.CUDAGraph()
         with torch.cuda.graph(self.graph):
-            # Run the model with the dummy inputs.
             hidden_states = self.model(
                 input_ids,
                 positions,
@@ -412,6 +422,7 @@ class CUDAGraphRunner:
                 input_metadata,
             )
 
+        # Save the input and output buffers.
         self.input_buffers = {
             "input_ids": input_ids,
             "positions": positions,
