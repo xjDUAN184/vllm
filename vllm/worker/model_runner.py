@@ -79,10 +79,16 @@ class ModelRunner:
                 continue
 
             # Compute the slot mapping.
-            # FIXME: Handle sliding window here.
             slot_mapping.append([])
             block_table = seq_group_metadata.block_tables[seq_id]
+            start_idx = 0
+            if self.sliding_window is not None:
+                start_idx = max(0, prompt_len - self.sliding_window)
             for i in range(prompt_len):
+                if i < start_idx:
+                    slot_mapping[-1].append(_PAD_SLOT_ID)
+                    continue
+
                 block_number = block_table[i // self.block_size]
                 block_offset = i % self.block_size
                 slot = block_number * self.block_size + block_offset
