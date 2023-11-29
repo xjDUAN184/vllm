@@ -105,7 +105,7 @@ if __name__ == '__main__':
         'for BF16 models.')
     parser.add_argument('--enforce-eager',
                         action='store_true',
-                        help='enforce eager mode and disable torch.compile')
+                        help='enforce eager mode and disable CUDA graph')
     parser.add_argument(
         '--profile',
         action='store_true',

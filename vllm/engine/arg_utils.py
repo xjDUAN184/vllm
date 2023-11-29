@@ -186,7 +186,7 @@ class EngineArgs:
         parser.add_argument('--enforce-eager',
                             action='store_true',
                             help='Always use eager-mode PyTorch. If False, '
-                            'will use eager mode and torch.compile in hybrid '
+                            'will use eager mode and CUDA graph in hybrid '
                             'for maximal performance and flexibility.')
         return parser
 

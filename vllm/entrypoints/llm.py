@@ -56,8 +56,8 @@ class LLM:
             requests will have `best_of=1`, you can safely set this to 0.
             Otherwise, too small values may cause out-of-memory (OOM) errors.
         enforce_eager: Whether to enforce eager execution. If True, we will
-            disable torch.compile and always execute the model in eager mode.
-            If False, we will use torch.compile and eager execution in hybrid.
+            disable CUDA graph and always execute the model in eager mode.
+            If False, we will use CUDA graph and eager execution in hybrid.
     """
 
     def __init__(
