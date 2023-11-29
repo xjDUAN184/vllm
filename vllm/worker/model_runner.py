@@ -143,7 +143,10 @@ class ModelRunner:
                 slot = block_number * self.block_size + block_offset
                 slot_mapping.append([slot])
 
-                # FIXME: Handle sliding window here.
+                if self.sliding_window is not None:
+                    sliding_window_blocks = (self.sliding_window //
+                                             self.block_size)
+                    block_table = block_table[-sliding_window_blocks:]
                 block_tables.append(block_table)
 
         batch_size = len(input_tokens)
