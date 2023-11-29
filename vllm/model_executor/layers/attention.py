@@ -91,16 +91,18 @@ class PagedAttention(nn.Module):
                                                     self.num_kv_heads,
                                                     self.num_queries_per_kv,
                                                     value.shape[-1])
-            # Set attention bias.
+            # Set attention bias if not provided.
             # FIXME: This is a hack.
             if input_metadata.attn_bias is None:
                 prompt_lens = [seq_len] * batch_size
-                attn_bias = BlockDiagonalCausalMask.from_seqlens(prompt_lens)
-                # FIXME: Sliding window is not properly applied.
-                if self.sliding_window is not None:
-                    attn_bias = attn_bias.make_local_attention(
-                        self.sliding_window)
-                input_metadata.attn_bias = attn_bias
+                if self.alibi_slopes is None:
+                    attn_bias = BlockDiagonalCausalMask.from_seqlens(prompt_lens)
+                    if self.sliding_window is not None:
+                        attn_bias = attn_bias.make_local_attention(
+                            self.sliding_window)
+                    input_metadata.attn_bias = attn_bias
+                else:
+                    pass
 
             # TODO(woosuk): The unsqueeze op may incur some CPU overhead. Optimize.
             out = xops.memory_efficient_attention_forward(
