@@ -93,7 +93,7 @@ class PagedAttention(nn.Module):
                                                     value.shape[-1])
             # Set attention bias.
             # FIXME: This is a hack.
-            if not hasattr(input_metadata, "attn_bias"):
+            if input_metadata.attn_bias is None:
                 prompt_lens = [seq_len] * batch_size
                 attn_bias = BlockDiagonalCausalMask.from_seqlens(prompt_lens)
                 # FIXME: Sliding window is not properly applied.

@@ -18,6 +18,8 @@ class InputMetadata:
         self.block_tables = block_tables
 
         self.is_prompt = len(prompt_lens) > 0
+        # Set during the execution of the first attention op. 
+        self.attn_bias = None
 
     def __repr__(self) -> str:
         return (f"InputMetadata("
