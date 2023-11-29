@@ -13,6 +13,8 @@ from vllm.sequence import SamplerOutput, SequenceData, SequenceGroupMetadata
 logger = init_logger(__name__)
 
 _PAD_SLOT_ID = -1
+# Capture graphs for batch size 1, 2, 4, 8, 16, 24, 32, 40, ..., 256.
+_BATCH_SIZES_TO_CAPTURE = [1, 2, 4, 8] + [8 * i for i in range(2, 33)]
 
 
 class ModelRunner:
@@ -278,8 +280,7 @@ class ModelRunner:
             len(metadata.seq_data) for metadata in seq_group_metadata_list)
         padded_batch_size = None
         if not self.model_config.enforce_eager and not is_prompt:
-            padded_batch_size = _get_padded_batch_size(
-                batch_size, self.graph_runners.keys())
+            padded_batch_size = _get_padded_batch_size(batch_size)
 
         # Prepare input tensors.
         if is_prompt:
@@ -348,12 +349,10 @@ class ModelRunner:
                     "run the model in eager mode, set 'enforce_eager=True' or "
                     "use '--enforce-eager' in the CLI.")
 
-        # Create graphs for batch size 1, 2, 4, 8, 16, 24, 32, 40, ..., 256.
-        batch_sizes_to_capture = [1, 2, 4, 8] + [8 * i for i in range(2, 33)]
         start_time = time.perf_counter()
         # NOTE: Capturing the largest batch size first may help reduce the
         # memory usage of CUDA graph.
-        for batch_size in reversed(batch_sizes_to_capture):
+        for batch_size in reversed(_BATCH_SIZES_TO_CAPTURE):
             # Create dummy inputs.
             input_tokens = _make_tensor_with_pad([[]] * batch_size,
                                                  max_len=1,
@@ -487,9 +486,9 @@ def _make_tensor_with_pad(
     return torch.tensor(padded_x, dtype=dtype, device="cuda")
 
 
-def _get_padded_batch_size(batch_size: int,
-                           buckets: List[int]) -> Optional[int]:
-    for bucket in sorted(buckets):
+def _get_padded_batch_size(batch_size: int) -> Optional[int]:
+    # Do we need to optimize this?
+    for bucket in _BATCH_SIZES_TO_CAPTURE:
         if batch_size <= bucket:
             return bucket
     return None
