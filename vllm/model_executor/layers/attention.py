@@ -17,64 +17,6 @@ _SUPPORTED_HEAD_SIZES = [64, 80, 96, 112, 128, 256]
 _PARTITION_SIZE = 512
 
 
-@torch_custom_ops.custom_op("vllm::cache_kv")
-def cache_kv(
-    query: torch.Tensor,
-    key: torch.Tensor,
-    value: torch.Tensor,
-    key_cache: torch.Tensor,
-    value_cache: torch.Tensor,
-    slot_mapping: torch.Tensor,
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    raise NotImplementedError()
-
-
-@torch_custom_ops.impl("vllm::cache_kv", device_types="cuda")
-def cache_kv_impl(
-    query: torch.Tensor,
-    key: torch.Tensor,
-    value: torch.Tensor,
-    key_cache: torch.Tensor,
-    value_cache: torch.Tensor,
-    slot_mapping: torch.Tensor,
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    # NOTE: query is actually not used in the custom op. We pass it to create
-    # a fake dependency so that the compiler cannot skip the custom op.
-    # FIXME: The custom op should not be in-place.
-    cache_ops.reshape_and_cache(
-        key,
-        value,
-        key_cache,
-        value_cache,
-        slot_mapping,
-    )
-    return query, key
-
-
-@torch_custom_ops.impl_abstract("vllm::cache_kv")
-def cache_kv_abstract(
-    query: torch.Tensor,
-    key: torch.Tensor,
-    value: torch.Tensor,
-    key_cache: torch.Tensor,
-    value_cache: torch.Tensor,
-    slot_mapping: torch.Tensor,
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    out_query = torch.empty_strided(
-        query.shape,
-        query.stride(),
-        dtype=query.dtype,
-        device=query.device,
-    )
-    out_key = torch.empty_strided(
-        key.shape,
-        key.stride(),
-        dtype=key.dtype,
-        device=key.device,
-    )
-    return out_query, out_key
-
-
 @torch_custom_ops.custom_op("vllm::paged_attn")
 def paged_attn(
     query: torch.Tensor,
@@ -180,21 +122,11 @@ class PagedAttention(nn.Module):
         slot_mapping = input_metadata.slot_mapping.flatten()
 
         # Reshape the keys and values and store them in the cache.
-        if input_metadata.is_prompt:
-            # If key_cache and value_cache are not provided, the new key
-            # and value vectors will not be cached. This happens during
-            # the initial profile run.
-            if key_cache is not None and value_cache is not None:
-                cache_ops.reshape_and_cache(
-                    key,
-                    value,
-                    key_cache,
-                    value_cache,
-                    slot_mapping,
-                )
-        else:
-            query, key = torch.ops.vllm.cache_kv(
-                query,
+        # If key_cache and value_cache are not provided, the new key and value
+        # vectors will not be cached. This happens during the initial memory
+        # profiling run.
+        if key_cache is not None and value_cache is not None:
+            cache_ops.reshape_and_cache(
                 key,
                 value,
                 key_cache,
