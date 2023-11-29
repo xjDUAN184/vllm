@@ -383,7 +383,7 @@ class ModelRunner:
         end_time = time.perf_counter()
         elapsed_time = end_time - start_time
         # This usually takes < 10 seconds.
-        logger.info(f"Graph capturing finished in {elapsed_time:.0f} s.")
+        logger.info(f"Graph capturing finished in {elapsed_time:.0f} secs.")
 
 
 class CUDAGraphRunner:
