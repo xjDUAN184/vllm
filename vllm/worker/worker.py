@@ -139,7 +139,8 @@ class Worker:
             self.cache_engine.copy(blocks_to_copy)
             issued_cache_op = True
 
-        # FIXME
+        # Wait for cache operations to complete.
+        # TODO(woosuk): Proflie and optimize the swapping overhead.
         if issued_cache_op:
             for event in self.cache_events:
                 event.wait()
