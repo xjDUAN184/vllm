@@ -12,6 +12,8 @@ from vllm.sequence import SamplerOutput, SequenceData, SequenceGroupMetadata
 
 logger = init_logger(__name__)
 
+_PAD_SLOT_ID = -1
+
 
 class ModelRunner:
 
@@ -73,7 +75,7 @@ class ModelRunner:
             if seq_group_metadata.block_tables is None:
                 # During memory profiling, the block tables are not initialized
                 # yet. In this case, we just use a dummy slot mapping.
-                slot_mapping.append([-1] * prompt_len)
+                slot_mapping.append([_PAD_SLOT_ID] * prompt_len)
                 continue
 
             # Compute the slot mapping.
@@ -97,7 +99,7 @@ class ModelRunner:
                                                 dtype=torch.long)
         slot_mapping = _make_tensor_with_pad(slot_mapping,
                                              max_prompt_len,
-                                             pad=-1,
+                                             pad=_PAD_SLOT_ID,
                                              dtype=torch.long)
 
         input_metadata = InputMetadata(
@@ -169,7 +171,7 @@ class ModelRunner:
                                                 dtype=torch.long)
         slot_mapping = _make_tensor_with_pad(slot_mapping,
                                              max_len=1,
-                                             pad=-1,
+                                             pad=_PAD_SLOT_ID,
                                              dtype=torch.long)
         context_lens = torch.tensor(context_lens,
                                     dtype=torch.int,
@@ -357,7 +359,7 @@ class ModelRunner:
                                                     dtype=torch.long)
             slot_mapping = _make_tensor_with_pad([[]] * batch_size,
                                                  max_len=1,
-                                                 pad=-1,
+                                                 pad=_PAD_SLOT_ID,
                                                  dtype=torch.long)
             context_lens = torch.tensor([1] * batch_size,
                                         dtype=torch.int,
