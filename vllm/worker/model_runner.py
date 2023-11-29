@@ -1,5 +1,5 @@
 import time
-from typing import Dict, List, Optional, Set, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -11,8 +11,6 @@ from vllm.sampling_params import SamplingParams, SamplingType
 from vllm.sequence import SamplerOutput, SequenceData, SequenceGroupMetadata
 
 logger = init_logger(__name__)
-
-BATCH_SIZES_TO_COMPILE = [1, 2, 4, 8] + [8 * i for i in range(2, 17)]
 
 
 class ModelRunner:
@@ -29,21 +27,21 @@ class ModelRunner:
 
         self.sliding_window = model_config.get_sliding_window()
         self.model = None
-        self.compiled_model = None
-        self.compiled_batch_sizes: Set[int] = set()
+        num_layers = model_config.get_num_layers(parallel_config)
+        # KV caches should be initialized to None for initial profiling.
+        self.kv_caches = [(None, None)] * num_layers
+        self.graph_runners: Dict[int, CUDAGraphRunner] = {}
         self.block_size = None
 
     def load_model(self) -> None:
-        model = get_model(self.model_config)
-        num_layers = self.model_config.get_num_layers(self.parallel_config)
-        self.model = ModelWrapper(model, kv_caches=[(None, None)] * num_layers)
+        self.model = get_model(self.model_config)
 
     def set_kv_cache(
         self,
         kv_caches: List[Tuple[torch.Tensor, torch.Tensor]],
         block_size: int,
     ) -> None:
-        self.model.kv_caches = kv_caches
+        self.kv_caches = kv_caches
         self.block_size = block_size
 
     def _prepare_prompt(
@@ -269,7 +267,8 @@ class ModelRunner:
             len(metadata.seq_data) for metadata in seq_group_metadata_list)
         padded_batch_size = None
         if not self.model_config.enforce_eager and not is_prompt:
-            padded_batch_size = _get_padded_batch_size(batch_size)
+            padded_batch_size = _get_padded_batch_size(
+                batch_size, self.graph_runners.keys())
 
         # Prepare input tensors.
         if is_prompt:
@@ -283,12 +282,13 @@ class ModelRunner:
                                                  input_metadata.prompt_lens)
 
         # Execute the model.
-        use_compiled_model = padded_batch_size is not None
-        model_executable = (self.compiled_model
-                            if use_compiled_model else self.model)
+        use_captured_graph = padded_batch_size is not None
+        model_executable = (self.graph_runners[padded_batch_size]
+                            if use_captured_graph else self.model)
         hidden_states = model_executable(
             input_ids=input_tokens,
             positions=input_positions,
+            kv_caches=self.kv_caches,
             input_metadata=input_metadata,
         )
         if batch_size != padded_batch_size:
@@ -330,19 +330,19 @@ class ModelRunner:
         return
 
     @torch.inference_mode()
-    def compile_model(self) -> None:
+    def capture_model(self) -> None:
         assert not self.model_config.enforce_eager
-        logger.info("Compiling the model using torch.compile, which may take "
-                    "several minutes. If you prefer to skip the compilation, "
-                    "albeit with performance degradation, set "
-                    "'enforce_eager=True' or use '--enforce-eager' in CLI.")
+        logger.info("Capturing the model using CUDA graph. This may lead to "
+                    "unexpected consequences if the model is not static. To "
+                    "run the model in eager mode, set 'enforce_eager=True' or "
+                    "use '--enforce-eager' in the CLI.")
 
+        # Create graphs for batch size 1, 2, 4, 8, 16, 24, 32, 40, ..., 256.
+        batch_sizes_to_capture = [1, 2, 4, 8] + [8 * i for i in range(2, 33)]
         start_time = time.perf_counter()
-        self.compiled_model = torch.compile(self.model,
-                                            mode="reduce-overhead",
-                                            fullgraph=True)
-
-        for batch_size in reversed(BATCH_SIZES_TO_COMPILE):
+        # NOTE: Capturing the largest batch size first may help reduce the
+        # memory usage of CUDA graph.
+        for batch_size in reversed(batch_sizes_to_capture):
             # Create dummy inputs.
             input_tokens = _make_tensor_with_pad([[]] * batch_size,
                                                  max_len=1,
@@ -371,49 +371,83 @@ class ModelRunner:
                 block_tables=block_tables,
             )
 
-            # Run the model with the dummy inputs.
-            self.compiled_model(
+            graph_runner = CUDAGraphRunner(self.model)
+            graph_runner.capture(
                 input_tokens,
                 input_positions,
+                self.kv_caches,
+                input_metadata,
+            )
+            self.graph_runners[batch_size] = graph_runner
+
+        end_time = time.perf_counter()
+        elapsed_time = end_time - start_time
+        # This usually takes < 10 seconds.
+        logger.info(f"Graph capturing finished in {elapsed_time:.0f} s.")
+
+
+class CUDAGraphRunner:
+
+    def __init__(self, model: nn.Module):
+        self.model = model
+        self.graph = None
+        self.input_buffers: Dict[str, torch.Tensor] = {}
+        self.output_buffers: Dict[str, torch.Tensor] = {}
+
+    def capture(
+        self,
+        input_ids: torch.Tensor,
+        positions: torch.Tensor,
+        kv_caches: List[Tuple[torch.Tensor, torch.Tensor]],
+        input_metadata: InputMetadata,
+    ) -> None:
+        assert self.graph is None
+        self.graph = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(self.graph):
+            # Run the model with the dummy inputs.
+            hidden_states = self.model(
+                input_ids,
+                positions,
+                kv_caches,
                 input_metadata,
             )
 
-        end_time = time.perf_counter()
-        compile_time = end_time - start_time
-        logger.info(f"Model compilation finished in {compile_time:.0f} s.")
-
-
-class ModelWrapper(nn.Module):
-
-    def __init__(
-        self,
-        model: nn.Module,
-        kv_caches: List[Tuple[torch.Tensor, torch.Tensor]],
-    ):
-        super().__init__()
-        self.model = model
-        self.kv_caches = kv_caches
+        self.input_buffers = {
+            "input_ids": input_ids,
+            "positions": positions,
+            "kv_caches": kv_caches,
+            "slot_mapping": input_metadata.slot_mapping,
+            "context_lens": input_metadata.context_lens,
+            "block_tables": input_metadata.block_tables,
+        }
+        self.output_buffers = {"hidden_states": hidden_states}
+        return
 
     def forward(
         self,
         input_ids: torch.Tensor,
         positions: torch.Tensor,
+        kv_caches: List[Tuple[torch.Tensor, torch.Tensor]],
         input_metadata: InputMetadata,
     ) -> torch.Tensor:
-        hidden_states = self.model(
-            input_ids,
-            positions,
-            self.kv_caches,
-            input_metadata,
-        )
-        return hidden_states
+        # KV caches are fixed tensors, so we don't need to copy them.
+        assert kv_caches == self.input_buffers["kv_caches"]
 
-    def sample(
-        self,
-        hidden_states: torch.Tensor,
-        sampling_metadata: SamplingMetadata,
-    ) -> SamplerOutput:
-        return self.model.sample(hidden_states, sampling_metadata)
+        # Copy the input tensors to the input buffers.
+        self.input_buffers["input_ids"].copy_(input_ids)
+        self.input_buffers["positions"].copy_(positions)
+        self.input_buffers["slot_mapping"].copy_(input_metadata.slot_mapping)
+        self.input_buffers["context_lens"].copy_(input_metadata.context_lens)
+        self.input_buffers["block_tables"].copy_(input_metadata.block_tables)
+
+        # Run the graph.
+        self.graph.replay()
+
+        # Return the output tensor.
+        return self.output_buffers["hidden_states"]
+
+    def __call__(self, *args, **kwargs):
+        return self.forward(*args, **kwargs)
 
 
 def _pad_to_max(x: List[int], max_len: int, pad: int) -> List[int]:
@@ -431,12 +465,9 @@ def _make_tensor_with_pad(
     return torch.tensor(padded_x, dtype=dtype, device="cuda")
 
 
-def _get_padded_batch_size(batch_size: int) -> Optional[int]:
-    if batch_size <= 2:
-        return batch_size
-    elif batch_size <= 4:
-        return 4
-    elif batch_size <= BATCH_SIZES_TO_COMPILE[-1]:
-        return (batch_size + 7) // 8 * 8
-    else:
-        return None
+def _get_padded_batch_size(batch_size: int,
+                           buckets: List[int]) -> Optional[int]:
+    for bucket in sorted(buckets):
+        if batch_size <= bucket:
+            return bucket
+    return None

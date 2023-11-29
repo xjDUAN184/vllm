@@ -117,7 +117,7 @@ class Worker:
                                        cache_config.block_size)
         # FIXME
         if not self.model_config.enforce_eager:
-            self.model_runner.compile_model()
+            self.model_runner.capture_model()
 
     @torch.inference_mode()
     def execute_model(
