@@ -14,7 +14,7 @@ logger = init_logger(__name__)
 
 _PAD_SLOT_ID = -1
 # Capture graphs for batch size 1, 2, 4, 8, 16, 24, 32, 40, ..., 256.
-_BATCH_SIZES_TO_CAPTURE = [1, 2, 4, 8] + [8 * i for i in range(2, 33)]
+_BATCH_SIZES_TO_CAPTURE = [1, 2, 4] + [8 * i for i in range(1, 33)]
 
 
 class ModelRunner:
