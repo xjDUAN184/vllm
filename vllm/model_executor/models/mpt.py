@@ -88,8 +88,10 @@ class MPTAttention(nn.Module):
 
         self.head_dim = self.d_model // self.total_num_heads
         scaling = self.head_dim**-0.5
-        self.attn = PagedAttention(self.num_heads, self.head_dim,
-                                            scaling, alibi_slopes=alibi_slopes)
+        self.attn = PagedAttention(self.num_heads,
+                                   self.head_dim,
+                                   scaling,
+                                   alibi_slopes=alibi_slopes)
 
     def forward(
         self,

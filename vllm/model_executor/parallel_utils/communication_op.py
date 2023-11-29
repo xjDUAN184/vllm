@@ -20,7 +20,9 @@ def tensor_model_parallel_all_reduce(
     # Bypass the function if we are using only 1 GPU.
     if tp_world_size == 1:
         return input_
-    return distfunc.all_reduce(input_, reduce_op, group=get_tensor_model_parallel_group())
+    return distfunc.all_reduce(input_,
+                               reduce_op,
+                               group=get_tensor_model_parallel_group())
 
 
 def tensor_model_parallel_all_gather(input_, dim=-1):
