@@ -115,7 +115,8 @@ class Worker:
         self.cache_events = self.cache_engine.events
         self.model_runner.set_kv_cache(self.cache_engine.gpu_cache,
                                        cache_config.block_size)
-        # FIXME
+
+    def warm_up_model(self) -> None:
         if not self.model_config.enforce_eager:
             self.model_runner.capture_model()
 
