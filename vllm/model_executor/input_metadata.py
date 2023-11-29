@@ -19,6 +19,7 @@ class InputMetadata:
 
         self.is_prompt = len(prompt_lens) > 0
         # Set during the execution of the first attention op. 
+        # FIXME(woosuk): This is a hack.
         self.attn_bias = None
 
     def __repr__(self) -> str:
