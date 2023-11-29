@@ -91,24 +91,34 @@ class PagedAttention(nn.Module):
                                                     self.num_kv_heads,
                                                     self.num_queries_per_kv,
                                                     value.shape[-1])
-            # Set attention bias if not provided.
-            # FIXME: This is a hack.
+
+            # Set attention bias if not provided. FIXME: This is a hack.
             if input_metadata.attn_bias is None:
-                prompt_lens = [seq_len] * batch_size
                 if self.alibi_slopes is None:
-                    attn_bias = BlockDiagonalCausalMask.from_seqlens(prompt_lens)
+                    attn_bias = BlockDiagonalCausalMask.from_seqlens(
+                        [seq_len] * batch_size)
                     if self.sliding_window is not None:
                         attn_bias = attn_bias.make_local_attention(
                             self.sliding_window)
                     input_metadata.attn_bias = attn_bias
                 else:
-                    pass
+                    input_metadata.attn_bias = _make_alibi_bias(
+                        self.alibi_slopes, batch_size, seq_len, query.dtype)
 
-            # TODO(woosuk): The unsqueeze op may incur some CPU overhead. Optimize.
+            # TODO(woosuk): Too much views. Can we do better?
+            if self.alibi_slopes is None:
+                query = query.unsqueeze(0)
+                key = key.unsqueeze(0)
+                value = value.unsqueeze(0)
+            else:
+                query = query.unflatten(0, (batch_size, seq_len))
+                key = key.unflatten(0, (batch_size, seq_len))
+                value = value.unflatten(0, (batch_size, seq_len))
+
             out = xops.memory_efficient_attention_forward(
-                query.unsqueeze(0),
-                key.unsqueeze(0),
-                value.unsqueeze(0),
+                query,
+                key,
+                value,
                 attn_bias=input_metadata.attn_bias,
                 p=0.0,
                 scale=self.scale,
@@ -139,3 +149,34 @@ class PagedAttention(nn.Module):
 # FIXME: Temporary hack to avoid import errors.
 PagedAttentionWithRoPE = PagedAttention
 PagedAttentionWithALiBi = PagedAttention
+
+
+def _make_alibi_bias(
+    alibi_slopes: torch.Tensor,
+    batch_size: int,
+    seq_len: int,
+    dtype: torch.dtype,
+) -> LowerTriangularMaskWithTensorBias:
+    bias = torch.arange(seq_len, dtype=dtype)
+    # NOTE(zhuohan): HF uses
+    #     `bias = bias[None, :].repeat(prompt_len, 1)`
+    # here. We find that both biases give the same results, but
+    # the bias below more accurately follows the original ALiBi
+    # paper.
+    bias = bias[None, :] - bias[:, None]
+    bias = bias.to(alibi_slopes.device)
+
+    # When using custom attention bias, xformers requires the bias to
+    # be sliced from a tensor whose length is a multiple of 8.
+    padded_len = (seq_len + 7) // 8 * 8
+    bias = torch.empty(
+        batch_size,
+        alibi_slopes.shape[0],
+        seq_len,
+        padded_len,
+        device=alibi_slopes.device,
+        dtype=dtype,
+    )[:, :, :, :seq_len].copy_(bias)
+    bias.mul_(alibi_slopes[:, None, None])
+    attn_bias = LowerTriangularMaskWithTensorBias(bias)
+    return attn_bias
