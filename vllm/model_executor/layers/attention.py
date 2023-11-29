@@ -17,63 +17,6 @@ _SUPPORTED_HEAD_SIZES = [64, 80, 96, 112, 128, 256]
 _PARTITION_SIZE = 512
 
 
-@torch_custom_ops.custom_op("vllm::paged_attn")
-def paged_attn(
-    query: torch.Tensor,
-    key_cache: torch.Tensor,
-    value_cache: torch.Tensor,
-    head_mapping: torch.Tensor,
-    scale: float,
-    block_tables: torch.Tensor,
-    context_lens: torch.Tensor,
-    alibi_slopes: Optional[torch.Tensor],
-) -> torch.Tensor:
-    raise NotImplementedError()
-
-
-@torch_custom_ops.impl("vllm::paged_attn", device_types="cuda")
-def paged_attn_impl(
-    query: torch.Tensor,
-    key_cache: torch.Tensor,
-    value_cache: torch.Tensor,
-    head_mapping: torch.Tensor,
-    scale: float,
-    block_tables: torch.Tensor,
-    context_lens: torch.Tensor,
-    alibi_slopes: Optional[torch.Tensor],
-) -> torch.Tensor:
-    output = torch.empty_like(query)
-    block_size = value_cache.shape[3]
-    ops.paged_attention_v1(
-        output,
-        query,
-        key_cache,
-        value_cache,
-        head_mapping,
-        scale,
-        block_tables,
-        context_lens,
-        block_size,
-        8192,  # FIXME
-        alibi_slopes,
-    )
-    return output
-
-
-@torch_custom_ops.impl_abstract("vllm::paged_attn")
-def paged_attn_abstract(
-    query: torch.Tensor,
-    key_cache: torch.Tensor,
-    value_cache: torch.Tensor,
-    head_mapping: torch.Tensor,
-    scale: float,
-    block_tables: torch.Tensor,
-    context_lens: torch.Tensor,
-    alibi_slopes: Optional[torch.Tensor],
-) -> torch.Tensor:
-    return torch.empty_like(query)
-
-
 class PagedAttention(nn.Module):
 
     def __init__(
@@ -172,7 +115,10 @@ class PagedAttention(nn.Module):
             output = out.view_as(query)
         else:
             # Decoding run.
-            output = torch.ops.vllm.paged_attn(
+            block_size = value_cache.shape[3]
+            output = torch.empty_like(query)
+            ops.paged_attention_v1(
+                output,
                 query,
                 key_cache,
                 value_cache,
@@ -180,6 +126,8 @@ class PagedAttention(nn.Module):
                 self.scale,
                 input_metadata.block_tables,
                 input_metadata.context_lens,
+                block_size,
+                8192,  # FIXME
                 self.alibi_slopes,
             )
 
