@@ -1,6 +1,8 @@
 from vllm.model_executor.models.aquila import AquilaForCausalLM
 from vllm.model_executor.models.baichuan import (BaiChuanForCausalLM,
-                                                 BaichuanForCausalLM)
+                                                 BaichuanForCausalLM,
+                                                 Baichuan2ForCausalLM,
+                                                 BaiChuan2ForCausalLM)
 from vllm.model_executor.models.bloom import BloomForCausalLM
 from vllm.model_executor.models.falcon import FalconForCausalLM
 from vllm.model_executor.models.gpt2 import GPT2LMHeadModel
@@ -10,7 +12,7 @@ from vllm.model_executor.models.gpt_neox import GPTNeoXForCausalLM
 from vllm.model_executor.models.internlm import InternLMForCausalLM
 from vllm.model_executor.models.llama import LlamaForCausalLM
 from vllm.model_executor.models.mistral import MistralForCausalLM
-from vllm.model_executor.models.mpt import MPTForCausalLM
+from vllm.model_executor.models.mpt import MptForCausalLM
 from vllm.model_executor.models.opt import OPTForCausalLM
 from vllm.model_executor.models.qwen import QWenLMHeadModel
 
@@ -18,6 +20,8 @@ __all__ = [
     "AquilaForCausalLM",
     "BaiChuanForCausalLM",
     "BaichuanForCausalLM",
+    "Baichuan2ForCausalLM",
+    "BaiChuan2ForCausalLM",
     "BloomForCausalLM",
     "FalconForCausalLM",
     "GPT2LMHeadModel",
@@ -26,7 +30,7 @@ __all__ = [
     "GPTNeoXForCausalLM",
     "InternLMForCausalLM",
     "LlamaForCausalLM",
-    "MPTForCausalLM",
+    "MptForCausalLM",
     "OPTForCausalLM",
     "QWenLMHeadModel",
     "MistralForCausalLM",

@@ -27,10 +27,13 @@ class EngineArgs:
     gpu_memory_utilization: float = 0.90
     max_num_batched_tokens: Optional[int] = None
     max_num_seqs: int = 256
+    max_paddings: int = 256
     disable_log_stats: bool = False
     revision: Optional[str] = None
     tokenizer_revision: Optional[str] = None
     quantization: Optional[str] = None
+    lora_paths: Optional[list[str]] = None
+    adapter_names: Optional[list[str]] = None
 
     def __post_init__(self):
         if self.tokenizer is None:
@@ -157,6 +160,10 @@ class EngineArgs:
                             type=int,
                             default=EngineArgs.max_num_seqs,
                             help='maximum number of sequences per iteration')
+        parser.add_argument('--max-paddings',
+                            type=int,
+                            default=EngineArgs.max_paddings,
+                            help='maximum number of paddings in a batch')
         parser.add_argument('--disable-log-stats',
                             action='store_true',
                             help='disable logging statistics')
@@ -164,9 +171,26 @@ class EngineArgs:
         parser.add_argument('--quantization',
                             '-q',
                             type=str,
-                            choices=['awq', None],
+                            choices=['awq', 'squeezellm', None],
                             default=None,
                             help='Method used to quantize the weights')
+        parser.add_argument('--lora-paths',
+                            metavar='path',
+                            type=str,
+                            default=None,
+                            nargs='+',
+                            help='the paths of lora model you want to load:' +
+                            '[lora_path1 lora_path2 ...]')
+
+        parser.add_argument(
+            '--adapter-names',
+            metavar='adapter_name',
+            type=str,
+            default=None,
+            nargs='+',
+            help='the adapter names of lora model you want to load, each name'
+            + ' should be unique and needs to correspond to the path ' +
+            'one-to-one: [name1 name2 ...]')
         return parser
 
     @classmethod
@@ -194,7 +218,8 @@ class EngineArgs:
                                          self.worker_use_ray)
         scheduler_config = SchedulerConfig(self.max_num_batched_tokens,
                                            self.max_num_seqs,
-                                           model_config.max_model_len)
+                                           model_config.max_model_len,
+                                           self.max_paddings)
         return model_config, cache_config, parallel_config, scheduler_config
 
 
