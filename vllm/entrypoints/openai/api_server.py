@@ -7,7 +7,7 @@ import json
 import time
 from http import HTTPStatus
 from typing import AsyncGenerator, Dict, List, Optional, Tuple, Union
-
+import torch
 import fastapi
 import uvicorn
 from fastapi import Request
@@ -112,9 +112,58 @@ async def get_gen_prompt(request) -> str:
         # Add a blank message for the assistant.
         conv.append_message(conv.roles[1], None)
         prompt = conv.get_prompt()
-
+        print(">>>>>>>>>>>>>>>>>>", prompt)
     return prompt
 
+async def build_chat_input(request):
+    # model, tokenizer, messages: List[dict], max_new_tokens: int=0
+    """Baichuan2的输入构建方式"""
+    def _parse_messages(messages, split_role="user"):
+        system, rounds = "", []
+        round = []
+        for i, message in enumerate(messages):
+            if message["role"] == "system":
+                assert i == 0
+                system = message["content"]
+                continue
+            if message["role"] == split_role and round:
+                rounds.append(round)
+                round = []
+            round.append(message)
+        if round:
+            rounds.append(round)
+        return system, rounds
+    # model = request.
+    max_new_tokens = request.max_new_tokens
+    max_input_tokens = request.max_model_len - max_new_tokens
+    system, rounds = _parse_messages(request.messages, split_role="user")
+
+    max_new_tokens = max_new_tokens or model.generation_config.max_new_tokens # 
+    max_input_tokens = model.config.model_max_length - max_new_tokens
+    system, rounds = _parse_messages(messages, split_role="user")
+    system_tokens = tokenizer.encode(system)
+    max_history_tokens = max_input_tokens - len(system_tokens)
+
+    history_tokens = []
+    for round in rounds[::-1]:
+        round_tokens = []
+        for message in round:
+            if message["role"] == "user":
+                round_tokens.append(model.generation_config.user_token_id)
+            else:
+                round_tokens.append(model.generation_config.assistant_token_id)
+            round_tokens.extend(tokenizer.encode(message["content"]))
+        if len(history_tokens) == 0 or len(history_tokens) + len(round_tokens) <= max_history_tokens:
+            history_tokens = round_tokens + history_tokens  # concat left
+            if len(history_tokens) < max_history_tokens:
+                continue
+        break
+
+    input_tokens = system_tokens + history_tokens
+    if messages[-1]["role"] != "assistant":
+        input_tokens.append(model.generation_config.assistant_token_id)
+    input_tokens = input_tokens[-max_input_tokens:]  # truncate left
+    return torch.LongTensor([input_tokens]).to(model.device)
 
 async def check_length(
     request: Union[ChatCompletionRequest, CompletionRequest],
